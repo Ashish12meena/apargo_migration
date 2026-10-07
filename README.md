@@ -247,5 +247,3 @@ resolve in your repository, change the version properties at the top of `pom.xml
 
 Queries: `scripts/useful_queries.sql`. Risks of the server run: `docs/server_run_risks.md`, checks before it:
 `scripts/server_preflight.sql`.
-#   a p a r g o _ m i g r a t i o n  
- 

@@ -50,8 +50,45 @@ public class ConversationsStep implements MigrationStep {
         ctx.tx().inTx(() -> db.exec("UPDATE " + sql.mig("mig_chat") + " mc JOIN " + sql.tgt("conversations") + " c "
                 + "ON c.project_id = mc.project_id AND c.waba_phone_number_id = mc.waba_phone_number_id AND c.contact_id = mc.contact_id "
                 + "SET mc.conversation_id = c.id WHERE mc.conversation_id IS NULL"));
+        refreshSummaries(ctx);
         long orphan = db.count("SELECT COUNT(*) FROM " + sql.mig("mig_chat") + " WHERE conversation_id IS NULL" + scope);
         ctx.problems().aggregate(ProblemLog.Severity.ERROR, "mig_chat", "NO_CONVERSATION", orphan, "chats without a conversation");
+    }
+
+    /**
+     * Conversations created by the migration get their summary from ALL their migrated chats, so chats added by a later run
+     * (e.g. after a fix) move last_*_at / counters forward. Values only move forward: never older than what the row has.
+     */
+    private void refreshSummaries(StepContext ctx) {
+        Db db = ctx.db();
+        Sql sql = ctx.sql();
+        String li = "GREATEST(COALESCE(c.last_inbound_at, a.last_in), COALESCE(a.last_in, c.last_inbound_at))";
+        String lo = "GREATEST(COALESCE(c.last_outbound_at, a.last_out), COALESCE(a.last_out, c.last_outbound_at))";
+        String agg = "(SELECT conversation_id, MIN(created_at) first_at, MAX(created_at) last_at, "
+                + "MAX(CASE WHEN direction = 'INBOUND' THEN created_at END) last_in, MAX(CASE WHEN direction = 'OUTBOUND' THEN created_at END) last_out, "
+                + "SUM(direction = 'INBOUND') inbound, SUM(direction = 'OUTBOUND') outbound "
+                + "FROM " + sql.mig("mig_chat") + " WHERE conversation_id IS NOT NULL GROUP BY conversation_id) a";
+        int[] n = new int[2];
+        ctx.tx().inTx(() -> {
+            n[0] = db.exec("UPDATE " + sql.tgt("conversations") + " c JOIN " + sql.mig("mig_conversation") + " m ON m.conversation_id = c.id AND m.inserted = 1 "
+                    + "JOIN " + agg + " ON a.conversation_id = c.id "
+                    + "SET c.last_message_direction = IF(" + li + " IS NOT NULL AND (" + lo + " IS NULL OR " + li + " > " + lo + "), 'INBOUND', 'OUTBOUND'), "
+                    + "c.window_expires_at = " + li + " + INTERVAL 24 HOUR, "
+                    + "c.last_inbound_at = " + li + ", c.last_outbound_at = " + lo + ", "
+                    + "c.last_message_at = GREATEST(COALESCE(c.last_message_at, a.last_at), COALESCE(a.last_at, c.last_message_at)), "
+                    + "c.created_at = LEAST(c.created_at, COALESCE(a.first_at, c.created_at)) "
+                    + "WHERE NOT (c.last_inbound_at <=> " + li + " AND c.last_outbound_at <=> " + lo + " AND c.last_message_at >= a.last_at)", Map.of());
+            n[1] = db.exec("UPDATE " + sql.tgt("conversation_sessions") + " s JOIN " + sql.mig("mig_conversation") + " m ON m.session_id = s.id AND m.inserted = 1 "
+                    + "JOIN " + agg + " ON a.conversation_id = m.conversation_id "
+                    + "SET s.inbound_count = GREATEST(s.inbound_count, a.inbound), s.outbound_count = GREATEST(s.outbound_count, a.outbound), "
+                    + "s.opened_at = LEAST(s.opened_at, COALESCE(a.first_at, s.opened_at)), "
+                    + "s.last_activity_at = GREATEST(COALESCE(s.last_activity_at, a.last_at), COALESCE(a.last_at, s.last_activity_at)), "
+                    + "s.resolved_at = GREATEST(COALESCE(s.resolved_at, a.last_at), COALESCE(a.last_at, s.resolved_at)) "
+                    + "WHERE s.inbound_count < a.inbound OR s.outbound_count < a.outbound OR s.last_activity_at < a.last_at "
+                    + "OR s.opened_at > a.first_at", Map.of());
+        });
+        ctx.stats().entity("conversation").refreshed += n[0];
+        ctx.stats().entity("conversation_session").refreshed += n[1];
     }
 
     private void one(StepContext ctx, Row g, StepStats.Entity s, StepStats.Entity ss) {

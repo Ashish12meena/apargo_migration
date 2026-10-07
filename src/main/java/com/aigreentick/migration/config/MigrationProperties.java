@@ -262,9 +262,13 @@ public class MigrationProperties {
         private boolean openIfActiveAssignment = true;
         private int campaignMaxAttempts = 3;
         /** old chats.type -> INBOUND | OUTBOUND (lower-case keys). Unknown -> decided by number matching. */
-        private Map<String, String> chatDirection = new LinkedHashMap<>(Map.of(
-                "send", "OUTBOUND", "sent", "OUTBOUND", "outgoing", "OUTBOUND",
-                "receive", "INBOUND", "received", "INBOUND", "incoming", "INBOUND", "reply", "INBOUND"));
+        private Map<String, String> chatDirection = new LinkedHashMap<>(Map.ofEntries(
+                Map.entry("send", "OUTBOUND"), Map.entry("sent", "OUTBOUND"), Map.entry("outgoing", "OUTBOUND"),
+                Map.entry("receive", "INBOUND"), Map.entry("received", "INBOUND"), Map.entry("incoming", "INBOUND"),
+                Map.entry("reply", "INBOUND"),
+                // spellings found in the old chats.type (run 4: 290,210 rows with 'recieve')
+                Map.entry("recieve", "INBOUND"), Map.entry("recieved", "INBOUND"), Map.entry("recive", "INBOUND"),
+                Map.entry("recived", "INBOUND")));
         /** old chats.method -> messages.message_type (lower-case keys). Unknown -> UNSUPPORTED + WARN. */
         private Map<String, String> chatType = new LinkedHashMap<>(Map.ofEntries(
                 Map.entry("text", "TEXT"), Map.entry("template", "TEMPLATE"), Map.entry("image", "IMAGE"),
