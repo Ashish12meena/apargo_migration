@@ -1,0 +1,136 @@
+# ---------------------------------------------------------------------------------------------------------------
+# migration-service — every value can be overridden on the command line, e.g.
+#   java -jar target/migration-service.jar --migration.steps=03c-departments --migration.dry-run=true
+# ---------------------------------------------------------------------------------------------------------------
+spring:
+  main:
+    web-application-type: none
+    banner-mode: "off"
+  datasource:
+    # Default database = the service's tracking schema (created if missing). Every statement still uses schema-qualified
+    # names (old / target / mig); the three schemas MUST be on the same server so that data rows and their
+    # migration_id_map rows commit in one transaction.
+    url: jdbc:mysql://${DB_HOST:146.88.24.113}:${DB_PORT:3306}/${MIG_SCHEMA:aigreentick_migration}?createDatabaseIfNotExist=true&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&zeroDateTimeBehavior=CONVERT_TO_NULL&characterEncoding=UTF-8
+    username: ${DB_USER:root}
+    password: ${DB_PASSWORD:2024@Bajajsys}
+    hikari:
+      maximum-pool-size: 4          # 1 for the work, 1 for problem-log / run bookkeeping (REQUIRES_NEW), spare
+      connection-timeout: 30000
+      # strict mode: truncation, bad dates and bad ENUM values fail instead of being silently changed
+      connection-init-sql: "SET SESSION sql_mode = 'STRICT_ALL_TABLES,NO_ZERO_DATE,NO_ZERO_IN_DATE,ERROR_FOR_DIVISION_BY_ZERO'"
+  flyway:
+    # Flyway manages ONLY the tracking schema. Never point it at apargo_wa_messaging.
+    enabled: true
+    schemas: ${MIG_SCHEMA:aigreentick_migration}
+    default-schema: ${MIG_SCHEMA:aigreentick_migration}
+    create-schemas: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+
+logging:
+  level:
+    root: INFO
+    com.aigreentick.migration: INFO
+    org.flywaydb: WARN
+    com.zaxxer.hikari: WARN
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level %msg%n"
+  # the log is also written to a file (kept after the run); change with --logging.file.name=...
+  file:
+    name: ${MIG_LOG_FILE:logs/migration.log}
+  logback:
+    rollingpolicy:
+      max-file-size: 200MB
+      max-history: 60
+
+migration:
+  steps: ""                       # empty = all steps; else comma list of step ids (see README)
+  skip-steps: ""
+  dry-run: false                  # one transaction for the whole run, rolled back at the end
+  refresh: false                  # update the refreshable columns of rows that already exist
+  tenants: ""                     # pilot: comma list of OLD customer user ids (role 3)
+  batch-size: 2000
+  reset-checkpoints: false
+
+  schemas:
+    old: ${OLD_SCHEMA:aigreentick_2nd}
+    target: ${TARGET_SCHEMA:apargo_wa_messaging}
+    mig: ${MIG_SCHEMA:aigreentick_migration}
+
+  legacy-map:
+    import-on-start: true         # copy Phase 1/2's <target>.migration_id_map into <mig>.migration_id_map
+    table: migration_id_map
+
+  baseline:                       # step 00 stops the run when these differ (Phase 1 report of the other developer)
+    enforce: true
+    old-users: 539
+    mapped-users: 529
+    distinct-new-users: 487
+    new-users-total:              # grows once the new system is live -> report only
+
+  roles:
+    customer-role-id: 3
+    agent-role-id: 7
+    org-owner-slug: owner
+    project-admin-slug: admin
+    project-agent-slug: agent
+
+  tenant:
+    no-reseller-policy: SKIP      # D1: SKIP | ASSIGN  (decided later; switching to ASSIGN later is safe)
+    no-reseller-org-id: 1
+    reseller-admin-policy: SKIP   # D2: SKIP | OWN_PROJECT
+    merged-customer-policy: SKIP  # D4
+
+  auth:
+    fix-deleted-users: false      # D5
+
+  teams:
+    lead-role-slug: team-leader
+    lead-role-name: Team Leader
+    member-role-slug: support-agent
+    member-role-name: Support Agent
+
+  pricing:
+    default-country-code: IN
+    default-country-name: India
+    currency: INR
+
+  waba:
+    token-type: SYSTEM_USER
+    include-deleted: false
+    # pinacle_credentials.partner_id is NOT NULL and the old DB has none. Empty = use the old username ("unknown" if none).
+    pinnacle-partner-id: ""
+    # old billing_type codes that mean POSTPAID (comma separated); everything else is PREPAID
+    pinnacle-postpaid-billing-types: "2"
+
+  templates:
+    include-deleted: false
+    default-category: MARKETING
+
+  contacts:
+    default-dial-code: "91"
+    phone-with-plus: true         # normalized_phone "+919876543210"; must match what the contact service stores
+    opt-in-from-allowed-broadcast: true   # D6 — legal/product sign-off required
+    user-ref: ID                  # Q-S9: ID | UUID for VARCHAR(64) user columns of the contact service
+    source-id: 18                 # seeded contact_sources row "Migration" (uuid 89db02b3-b0fa-11f1-a67a-a687fa8690d2)
+    active-status-id: 1           # seeded contact_statuses: 1 = Active
+    invalid-status-id: 4          #                          4 = Invalid (numbers libphonenumber rejects)
+
+  history:                        # D7
+    chats-since: ""
+    reports-since: "2025-10-01"
+    broadcasts-since: ""
+
+  messaging:
+    auto-close-after-mins: 1440
+    default-timezone: Asia/Kolkata
+    open-if-active-assignment: true
+    campaign-max-attempts: 3
+
+  problems:
+    # every problem row is stored in mig_errors up to this many per (step, code); the rest only as one SUMMARY_<code> row
+    max-rows-per-code: 10000000
+
+  validate:
+    fail-on-error: false
