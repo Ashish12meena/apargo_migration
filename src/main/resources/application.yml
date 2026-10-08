@@ -86,10 +86,9 @@ migration:
     fix-deleted-users: false      # D5
 
   teams:
-    lead-role-slug: team-leader
-    lead-role-name: Team Leader
-    member-role-slug: support-agent
-    member-role-name: Support Agent
+    # old agent teams -> messaging teams + member table (decided 2026-10-08)
+    member-table: team_member          # Organization service owns `team_members`; messaging uses `team_member`
+    routing-strategy: MANUAL           # old teams had no automatic routing
 
   pricing:
     default-country-code: IN

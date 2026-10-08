@@ -115,7 +115,7 @@ Steps always run in this order, even when only some are selected.
 | `03a-orphan-customers` | D1=ASSIGN: customers without reseller -> project in org `no-reseller-org-id` (+ their agents) | (org, slug) | `project` |
 | `03b-reseller-own-project` | D2=OWN_PROJECT: one project per reseller org (+ agents of the admin) | (org, slug) | `reseller_project` |
 | `03c-departments` | departments -> project_departments; users.department_id -> project_members | (project, name) | `department` |
-| `03d-teams` | agent_teams / members -> project_teams / team_members (+ seeds 2 project_team_roles per project) | (project, name) / (team, user) | `team` |
+| `03d-teams` | agent_teams -> messaging `teams` (MANUAL routing); agent_team_members -> messaging `team_member` (admin -> LEAD, agent -> MEMBER; removed members skipped) | (project, live name) / (team, user) | `messaging_team` |
 | `03h-deleted-users` | D5 | | |
 | `04a-meta-pricing` | platform_meta_pricing -> meta_messaging_charges | country_code | `meta_charge` |
 | `04b-reseller-pricing` | reseller_messages_pricing -> org_default_messaging_charges | (org, country) | `reseller_charge` |

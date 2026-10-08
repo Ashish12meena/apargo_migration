@@ -65,8 +65,9 @@ public class ValidateStep implements MigrationStep {
                 + "WHERE c.organization_id <> b.organization_id");
         checks.put("tenant.canned", "SELECT COUNT(*) FROM " + q.tgt("canned_responses") + " x JOIN " + map + " m ON m.entity = 'canned' AND m.new_id = x.id "
                 + "JOIN " + q.tgt("projects") + " p ON p.id = x.project_id WHERE p.organization_id <> x.organization_id");
-        checks.put("tenant.team_members", "SELECT COUNT(*) FROM " + q.tgt("team_members") + " tm JOIN " + map + " m ON m.entity = 'team' AND m.new_id = tm.team_id "
-                + "JOIN " + q.tgt("project_teams") + " t ON t.id = tm.team_id LEFT JOIN " + q.tgt("project_members") + " pm "
+        String memberTable = ctx.props().getTeams().getMemberTable();
+        checks.put("tenant.team_members", "SELECT COUNT(*) FROM " + q.tgt(memberTable) + " tm JOIN " + map + " m ON m.entity = 'messaging_team' AND m.new_id = tm.team_id "
+                + "JOIN " + q.tgt("teams") + " t ON t.id = tm.team_id LEFT JOIN " + q.tgt("project_members") + " pm "
                 + "ON pm.project_id = t.project_id AND pm.user_id = tm.user_id WHERE pm.id IS NULL");
 
         // parent -> child relations
@@ -97,6 +98,10 @@ public class ValidateStep implements MigrationStep {
         int failed = 0;
         for (Map.Entry<String, String> c : checks.entrySet()) {
             long n;
+            if (c.getKey().equals("tenant.team_members") && !ctx.db().tableExists(q.tgtSchema(), ctx.props().getTeams().getMemberTable())) {
+                record(ctx, c.getKey(), 0L, null, true, "skipped: " + ctx.props().getTeams().getMemberTable() + " does not exist");
+                continue;
+            }
             try {
                 n = ctx.db().count(c.getValue());
             } catch (RuntimeException e) {
@@ -113,7 +118,7 @@ public class ValidateStep implements MigrationStep {
         // reconciliation (report only): old rows vs mapped rows per entity
         String[][] recon = {
                 {"department", "SELECT COUNT(*) FROM " + q.old("departments")},
-                {"team", "SELECT COUNT(*) FROM " + q.old("agent_teams")},
+                {"messaging_team", "SELECT COUNT(*) FROM " + q.old("agent_teams")},
                 {"waba_phone", "SELECT COUNT(*) FROM " + q.old("whatsapp_accounts") + " WHERE deleted_at IS NULL"},
                 {"template", "SELECT COUNT(*) FROM " + q.old("templates") + " WHERE deleted_at IS NULL"},
                 {"contact", "SELECT COUNT(*) FROM " + q.old("chat_contacts") + " WHERE deleted_at IS NULL"},

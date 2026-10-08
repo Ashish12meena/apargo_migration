@@ -5,74 +5,84 @@ import com.aigreentick.migration.core.*;
 import com.aigreentick.migration.util.Text;
 import org.springframework.stereotype.Component;
 
-import java.time.LocalDateTime;
 import java.util.*;
 
 /**
- * 03d (D8, server schema S6) — {@code agent_teams} -> {@code project_teams}, {@code agent_team_members} ->
- * {@code team_members}. team_members.team_role_id is NOT NULL and project_team_roles is empty on the server, so two
- * project-level roles (team_id NULL) are seeded per project first: Team Leader (old role 'admin') and Support Agent
- * (old role 'agent', is_default). Members must already be members of the team's project.
+ * 03d (decided 2026-10-08) — old live-chat agent teams go to the MESSAGING service's teams:
+ * <pre>
+ *  agent_teams        -> teams        (project of the team creator, routing_strategy MANUAL)
+ *  agent_team_members -> team_member  (role admin -> LEAD, agent -> MEMBER; table name: migration.teams.member-table)
+ * </pre>
+ * The messaging member table is called {@code team_member} (not {@code team_members}): the Organization service owns a
+ * different {@code team_members} table (referenced by project_team_member_permissions), so the two cannot share a name.
+ * <ul>
+ *   <li>Natural keys: team = (project_id, live name); member = (team_id, user_id).</li>
+ *   <li>Removed members (old deleted_at set) are not migrated: the messaging table has no "removed" state (INFO).</li>
+ *   <li>A member must be a member of the team's project (project_members), else ERROR NOT_PROJECT_MEMBER.</li>
+ *   <li>Missing tables -> ERROR TABLE_MISSING and the step ends; the rest of the run goes on.</li>
+ * </ul>
+ * Map entity: messaging_team (old agent_teams.id -> teams.id).
  */
 @Component
 public class TeamsStep implements MigrationStep {
 
     @Override public String id() { return "03d-teams"; }
     @Override public int order() { return 340; }
-    @Override public String title() { return "agent_teams / members -> project_teams / team_members"; }
+    @Override public String title() { return "agent_teams / members -> messaging teams / team_member"; }
 
     @Override
     public void run(StepContext ctx) {
         Db db = ctx.db();
         Sql sql = ctx.sql();
         MigrationProperties.Teams cfg = ctx.props().getTeams();
-        Map<Long, long[]> rolesByProject = new HashMap<>();   // project -> [leadRoleId, memberRoleId]
+        String memberTable = cfg.getMemberTable();
+        if (!db.tableExists(sql.tgtSchema(), "teams")) {
+            ctx.problems().error("agent_teams", null, "TABLE_MISSING", "messaging table teams does not exist: teams not migrated");
+            return;
+        }
         StepStats.Entity s = ctx.stats().entity("team");
 
         for (Row t : db.rows("SELECT * FROM " + sql.old("agent_teams") + " ORDER BY id")) {
             long oldId = t.lng("id");
             s.read++;
-            if (ctx.idMap().has("team", oldId)) { s.skippedMapped++; continue; }
+            if (ctx.idMap().has("messaging_team", oldId)) { s.skippedMapped++; continue; }
             Tenant ten = ctx.place("agent_teams", oldId, t.lng("created_by"));
             if (ten == null) continue;
-            // team roles first, in their own unit, so a failed team row cannot roll back cached role ids
-            if (!rolesByProject.containsKey(ten.projectId())
-                    && !ctx.tx().row(ctx, "project_team_roles", ten.projectId(), () -> rolesFor(ctx, ten.projectId(), ten.userId(), cfg, rolesByProject))) {
-                rolesByProject.remove(ten.projectId());
-                continue;
-            }
             ctx.tx().row(ctx, "agent_teams", oldId, () -> {
                 String name = Text.cut(Text.firstNonBlank(t.str("name"), "Team " + oldId), 150);
-                Long existing = db.findId(sql.tgt("project_teams"), Map.of("project_id", ten.projectId(), "name", name));
+                Long existing = db.longValue("SELECT id FROM " + sql.tgt("teams") + " WHERE project_id = :p AND name = :n "
+                        + "AND deleted_at IS NULL ORDER BY id LIMIT 1", Map.of("p", ten.projectId(), "n", name));
                 if (existing != null) {
-                    ctx.idMap().put("team", oldId, existing);
+                    ctx.idMap().put("messaging_team", oldId, existing);
                     s.matchedExisting++;
                     return;
                 }
-                String slug = uniqueSlug(ctx, ten.projectId(), Text.slugify(name).isEmpty() ? "team-" + oldId : Text.slugify(name));
-                Long dept = ctx.idMap().get("department", t.lng("department_id"));
-                if (dept != null) {
-                    Row d = db.findRow(sql.tgt("project_departments"), Map.of("id", dept), "project_id");
-                    if (d == null || !Objects.equals(d.lng("project_id"), ten.projectId())) dept = null;
-                }
                 boolean active = t.bool("is_active") && t.isNull("deleted_at");
-                long id = db.insert(sql.tgt("project_teams"), Db.vals().with("project_id", ten.projectId())
-                        .with("name", name).with("slug", slug).with("description", t.str("description"))
-                        .with("status", active ? "active" : "archived").with("access_level", "team").with("level", 0)
-                        .with("department_id", dept).with("created_by", ten.userId())
-                        .with("created_at", t.dtOr("created_at", StepContext.nowSec()))
-                        .with("updated_at", t.dtOr("updated_at", StepContext.nowSec())));
-                db.update(sql.tgt("project_teams"), id, Db.vals().with("path", "/" + id + "/"));
-                ctx.idMap().put("team", oldId, id);
+                long id = db.insert(sql.tgt("teams"), Db.vals().with("created_at", t.dtOr("created_at", StepContext.now()))
+                        .with("updated_at", t.dtOr("updated_at", StepContext.now())).with("deleted_at", null)
+                        .with("is_active", active).with("description", Text.cut(t.str("description"), 500))
+                        .with("max_per_agent", null).with("name", name).with("organization_id", ten.orgId())
+                        .with("project_id", ten.projectId()).with("routing_strategy", cfg.getRoutingStrategy())
+                        .with("uuid", UUID.randomUUID().toString()));
+                ctx.idMap().put("messaging_team", oldId, id);
                 s.inserted++;
             });
         }
 
         StepStats.Entity m = ctx.stats().entity("team_member");
+        if (!db.tableExists(sql.tgtSchema(), memberTable)) {
+            ctx.problems().error("agent_team_members", null, "TABLE_MISSING",
+                    memberTable + " does not exist on the target: team members not migrated (create it, re-run 03d)");
+            return;
+        }
         for (Row r : db.rows("SELECT * FROM " + sql.old("agent_team_members") + " ORDER BY id")) {
             m.read++;
             long oldId = r.lng("id");
-            Long teamId = ctx.idMap().get("team", r.lng("team_id"));
+            if (!r.isNull("deleted_at")) {
+                ctx.problems().info("agent_team_members", oldId, "REMOVED_SKIPPED", "member was removed from the team in the old system");
+                continue;
+            }
+            Long teamId = ctx.idMap().get("messaging_team", r.lng("team_id"));
             if (teamId == null) {
                 if (!ctx.scope().isPilot()) {
                     ctx.problems().error("agent_team_members", oldId, "PARENT_MISSING", "team " + r.lng("team_id") + " not migrated");
@@ -80,7 +90,7 @@ public class TeamsStep implements MigrationStep {
                 }
                 continue;
             }
-            Row team = db.findRow(sql.tgt("project_teams"), Map.of("id", teamId), "id, project_id, created_by");
+            Row team = db.findRow(sql.tgt("teams"), Map.of("id", teamId), "id, project_id");
             if (team == null || !ctx.scope().includesProject(team.lng("project_id"))) continue;
             Long userId = ctx.idMap().get("user", r.lng("agent_id"));
             if (userId == null) {
@@ -89,58 +99,20 @@ public class TeamsStep implements MigrationStep {
                 continue;
             }
             long projectId = team.lng("project_id");
-            if (db.findId(sql.tgt("team_members"), Map.of("team_id", teamId, "user_id", userId)) != null) { m.matchedExisting++; continue; }
+            if (db.count("SELECT COUNT(*) FROM " + sql.tgt(memberTable) + " WHERE team_id = :t AND user_id = :u",
+                    Map.of("t", teamId, "u", userId)) > 0) { m.matchedExisting++; continue; }
             if (db.findId(sql.tgt("project_members"), Map.of("project_id", projectId, "user_id", userId)) == null) {
                 ctx.problems().error("agent_team_members", oldId, "NOT_PROJECT_MEMBER", "user " + userId + " is not a member of project " + projectId);
                 m.errors++;
                 continue;
             }
-            if (!rolesByProject.containsKey(projectId)
-                    && !ctx.tx().row(ctx, "project_team_roles", projectId, () -> rolesFor(ctx, projectId, team.lng("created_by"), cfg, rolesByProject))) {
-                rolesByProject.remove(projectId);
-                continue;
-            }
-            long[] roles = rolesByProject.get(projectId);
             ctx.tx().row(ctx, "agent_team_members", oldId, () -> {
-                boolean removed = !r.isNull("deleted_at");
-                db.insert(sql.tgt("team_members"), Db.vals().with("team_id", teamId).with("user_id", userId)
-                        .with("team_role_id", "admin".equalsIgnoreCase(r.str("role")) ? roles[0] : roles[1])
-                        .with("status", removed ? "removed" : "active").with("added_by", team.lng("created_by"))
-                        .with("added_at", r.dtOr("joined_at", r.dt("created_at")))
-                        .with("removed_at", removed ? r.dt("deleted_at") : null));
+                db.insertNoKey(sql.tgt(memberTable), Db.vals().with("team_id", teamId).with("user_id", userId)
+                        .with("role", "admin".equalsIgnoreCase(r.str("role")) ? "LEAD" : "MEMBER")
+                        .with("active_conversations", 0).with("is_available", true)
+                        .with("added_at", r.dtOr("joined_at", r.dtOr("created_at", StepContext.now()))));
                 m.inserted++;
             });
         }
-    }
-
-    /** project-level team roles (team_id NULL), created once per project */
-    private static long[] rolesFor(StepContext ctx, long projectId, Long createdBy, MigrationProperties.Teams cfg,
-                                   Map<Long, long[]> cache) {
-        long[] cached = cache.get(projectId);
-        if (cached != null) return cached;
-        long lead = role(ctx, projectId, cfg.getLeadRoleSlug(), cfg.getLeadRoleName(), false, createdBy);
-        long member = role(ctx, projectId, cfg.getMemberRoleSlug(), cfg.getMemberRoleName(), true, createdBy);
-        long[] r = {lead, member};
-        cache.put(projectId, r);
-        return r;
-    }
-
-    private static long role(StepContext ctx, long projectId, String slug, String name, boolean isDefault, Long createdBy) {
-        Long id = ctx.db().findId(ctx.sql().tgt("project_team_roles"),
-                Db.vals().with("slug", slug).with("project_id", projectId).with("team_id", null).with("deleted_at", null));
-        if (id != null) return id;
-        LocalDateTime now = StepContext.nowSec();
-        return ctx.db().insert(ctx.sql().tgt("project_team_roles"), Db.vals().with("uuid", UUID.randomUUID().toString())
-                .with("team_id", null).with("project_id", projectId).with("name", name).with("slug", slug)
-                .with("description", "Created by the legacy migration").with("created_by", createdBy)
-                .with("is_default", isDefault).with("is_system", true).with("status", "active")
-                .with("created_at", now).with("updated_at", now));
-    }
-
-    private static String uniqueSlug(StepContext ctx, long projectId, String base) {
-        String slug = Text.cut(base, 140);
-        for (int i = 2; ctx.db().findId(ctx.sql().tgt("project_teams"), Map.of("project_id", projectId, "slug", slug)) != null; i++)
-            slug = Text.cut(base, 140) + "-" + i;
-        return slug;
     }
 }

@@ -24,7 +24,8 @@ public class IdMap {
             "user", "users", "org", "organizations", "project", "projects", "reseller_project", "projects",
             // WABA tables were rebuilt by the WABA team: entries of run 1 may point to rows that no longer exist
             "business_manager", "business_managers", "meta_token", "meta_oauth_tokens",
-            "waba", "waba_accounts", "waba_phone", "waba_phone_numbers", "pinnacle_credential", "pinacle_credentials");
+            "waba", "waba_accounts", "waba_phone", "waba_phone_numbers", "pinnacle_credential", "pinacle_credentials",
+            "messaging_team", "teams");
 
     private final Db db;
     private final Sql sql;

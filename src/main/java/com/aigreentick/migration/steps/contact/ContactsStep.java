@@ -45,8 +45,10 @@ public class ContactsStep implements MigrationStep {
         long from = ctx.checkpoints().get(ctx.stepId(), "main");
         String createdBy = ctx.userRefs().refSql("m.new_user_id");
         String c0900 = " COLLATE utf8mb4_0900_ai_ci";
+        // contacts.is_starred was dropped from the contact service schema on 2026-10-08: write it only when it exists
+        boolean starred = db.columnExists(ctx.sql().tgtSchema(), "contacts", "is_starred");
         String insert = "INSERT INTO " + sql.tgt("contacts") + " (created_at, updated_at, deleted_at, country_code, created_by, dedupe_phone, "
-                + "dial_code, display_name, email, normalized_phone, organization_id, phone_number, search_text, is_starred, total_notes, "
+                + "dial_code, display_name, email, normalized_phone, organization_id, phone_number, search_text, " + (starred ? "is_starred, " : "") + "total_notes, "
                 + "total_projects, total_tags, updated_by, uuid, version, wa_number_status, source_id, status_id, inbound_policy) "
                 + "SELECT IF(c.created_at IS NULL OR c.created_at < '1970-01-02', NOW(6), c.created_at), "
                 + "IF(c.updated_at IS NULL OR c.updated_at < '1970-01-02', IF(c.created_at IS NULL OR c.created_at < '1970-01-02', NOW(6), c.created_at), c.updated_at), "
@@ -56,7 +58,7 @@ public class ContactsStep implements MigrationStep {
                 + "     THEN TRIM(CONVERT(c.email USING utf8mb4)" + c0900 + ") END, "
                 + "m.normalized, m.organization_id, LEFT(m.national, 20), "
                 + "LEFT(CONCAT_WS(' ', CONVERT(c.name USING utf8mb4)" + c0900 + ", m.normalized, CONVERT(c.email USING utf8mb4)" + c0900 + "), 2000), "
-                + "FALSE, 0, 0, 0, NULL, UUID(), 0, 'UNKNOWN', "
+                + (starred ? "FALSE, " : "") + "0, 0, 0, NULL, UUID(), 0, 'UNKNOWN', "
                 + ":source, "
                 + "IF(m.phone_valid = 1, :active, :invalid), 'ALLOWED' "
                 + "FROM " + sql.mig("mig_contact") + " m JOIN " + sql.old("chat_contacts") + " c ON c.id = m.old_id "
