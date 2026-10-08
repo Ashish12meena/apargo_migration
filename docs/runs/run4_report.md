@@ -4,7 +4,7 @@
 |---|---|
 | Run | `mig_run.id = 4`, on the DB server, all steps, 10:34 → 12:09 (1 h 35 min) |
 | Result | **Finished.** 16 of 17 relation checks OK, 1 FAIL (`tenant.template_waba`, 129 rows) |
-| Main finding | **290,210 chats (32 %) not migrated: old `chats.type = 'recieve'` (misspelled) was not recognised.** Fixed in the service; re-run 09c–09f |
+| Main findings | **290,210 chats (32 %) not migrated: old `chats.type = 'recieve'` (misspelled) was not recognised.** Old reports became recipients only, not messages. Both fixed; re-run 09c–09f + 09l |
 
 ## 1. Results per step
 
@@ -34,16 +34,37 @@ and the number fallback did not match either, so every one of these chats was sk
 get their summary (last inbound / outbound / message time, 24 h window, session counts) recomputed from all their chats,
 so the re-run moves them forward.
 
-**Re-run (server):**
+**Re-run (server), together with 2.4:**
 
 ```bash
 nohup java -Xmx4g -jar migration-service.jar \
-  --migration.steps=09c-chats-prepare,09d-conversations,09e-messages,09f-assignments,99-validate \
+  --migration.steps=09c-chats-prepare,09d-conversations,09e-messages,09f-assignments,09l-campaign-messages,99-validate \
   --migration.reset-checkpoints=true > migration-rerun-chats.log 2>&1 &
 ```
 
 Already migrated messages are skipped; only the missing ones are added. Tested locally: re-run adds the missing chat,
 updates its conversation, a second re-run changes nothing.
+
+### 2.4 Old reports were only recipients, not messages (fixed: new step 09l)
+
+In the new system every campaign send is a `messages` row (`campaign_id` + `contact_id` unique, `created_by_type = CAMPAIGN`)
+in the contact's conversation, and `broadcast_recipients.message_id` points to it. Run 4 created the 4.32M recipients
+but no messages: campaign templates were missing from chat history, delivered / read per recipient was lost, and
+contacts reached only by campaigns had no conversation.
+
+New step `09l-campaign-messages` (after 09j):
+
+| Rule | |
+|---|---|
+| Which recipients | migrated campaigns, state SENT / FAILED, `message_id` NULL (CANCELLED = never sent: no message) |
+| Link, not insert | a message with the same (campaign_id, contact_id), or with the same wamid (the send is also in old `chats`) |
+| Conversation | (campaign project, campaign phone number, contact); created when missing: RESOLVED, one session (`AGENT_OUTREACH`, `source_campaign_id`) |
+| Message | OUTBOUND, TEMPLATE, CAMPAIGN, `campaign_id`, wamid, `body_text` = template name, payload = template name / language / params + legacy report id and status |
+| Status | old report (by wamid) `status` / `message_status`, best of the two: SENT / DELIVERED / READ / FAILED; delivered_at / read_at / failed_at = report updated_at; without a report: recipient state |
+| After | `message_wamid` rows, `broadcast_recipients.message_id`, conversation last-message times and session counts moved forward |
+| Checks | `relation.recipient_message` (sent / failed recipients without a message), `tenant.campaign_messages` |
+
+Expected on the server: about 4.3M messages and up to several hundred thousand new conversations, roughly 20–60 min.
 
 ### 2.2 `tenant.template_waba` FAIL: 129 templates
 

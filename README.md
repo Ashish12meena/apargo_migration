@@ -135,6 +135,7 @@ Steps always run in this order, even when only some are selected.
 | `09g-canned-responses` | canned_messages -> canned_responses | live (project, shortcut) + same text | `canned` |
 | `09h-campaigns` | broadcasts -> broadcast_campaigns | | `campaign` |
 | `09j-recipients` | reports -> broadcast_recipients | (campaign, contact) | |
+| `09l-campaign-messages` | broadcast_recipients (old reports) -> messages (TEMPLATE, CAMPAIGN) in the contact's conversation (created if missing) + message_wamid; sets broadcast_recipients.message_id | (campaign_id, contact_id); same wamid = reuse the chat message | recipient.message_id |
 | `09k-campaign-counters` | reports -> broadcast_campaign_counters + campaign counts | (campaign, shard 0) | |
 | `99-validate` | 17 relation / tenant checks + reconciliation -> mig_validation | | |
 

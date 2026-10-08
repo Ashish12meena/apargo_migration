@@ -54,6 +54,12 @@ public class ValidateStep implements MigrationStep {
         checks.put("tenant.campaigns", "SELECT COUNT(*) FROM " + q.tgt("broadcast_campaigns") + " b JOIN " + map + " m ON m.entity = 'campaign' AND m.new_id = b.id "
                 + "JOIN " + q.tgt("projects") + " p ON p.id = b.project_id JOIN " + q.tgt("waba_accounts") + " w ON w.id = b.waba_account_id "
                 + "WHERE p.organization_id <> b.organization_id OR w.organization_id <> b.organization_id OR w.project_id <> b.project_id");
+        checks.put("tenant.campaign_messages", "SELECT COUNT(*) FROM " + q.tgt("messages") + " m JOIN " + q.tgt("broadcast_recipients") + " r ON r.message_id = m.id "
+                + "JOIN " + q.tgt("broadcast_campaigns") + " b ON b.id = r.campaign_id JOIN " + q.tgt("conversations") + " c ON c.id = m.conversation_id "
+                + "JOIN " + map + " mm ON mm.entity = 'campaign' AND mm.new_id = b.id "
+                + "WHERE m.contact_id <> r.contact_id OR m.project_id <> b.project_id OR c.contact_id <> m.contact_id OR c.project_id <> m.project_id");
+        checks.put("relation.recipient_message", "SELECT COUNT(*) FROM " + q.tgt("broadcast_recipients") + " r JOIN " + map
+                + " mm ON mm.entity = 'campaign' AND mm.new_id = r.campaign_id WHERE r.state IN ('SENT', 'FAILED') AND r.message_id IS NULL");
         checks.put("tenant.recipients", "SELECT COUNT(*) FROM " + q.tgt("broadcast_recipients") + " r JOIN " + map + " m ON m.entity = 'campaign' AND m.new_id = r.campaign_id "
                 + "JOIN " + q.tgt("broadcast_campaigns") + " b ON b.id = r.campaign_id JOIN " + q.tgt("contacts") + " c ON c.id = r.contact_id "
                 + "WHERE c.organization_id <> b.organization_id");
