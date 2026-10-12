@@ -239,7 +239,7 @@ Users count in new DB                              493
 
 ### 5.2 Queries that reproduce these numbers
 
-`00-verify-baseline` runs these and stops the service if they differ from the expected values in `application.yml` (`migration.baseline.*`), so nothing is built on a changed baseline.
+`00-verify-baseline` runs these and reports them. It stops the service only when the seed roles or the Phase 1 output are missing, or when a count differs from a value pinned in `application.yml` (`migration.baseline.*`, empty = report only). Since the move to 146.88.24.123 (2026-10-12) the counts are not pinned: Phase 1/2 data grew there, and the run follows `migration_id_map` as it is.
 
 ```sql
 -- OLD DB
@@ -962,7 +962,7 @@ The Spring Boot service is built (`migration-service/`, Java 21, Maven, Spring B
 | Plan item | Status |
 |---|---|
 | Bootstrap (every run): import Phase 1/2 map, backfill `project` map (metadata, then slug, cross-checked), rewrite `mig_tenant_map` | done |
-| 00 baseline + F1–F5 | done (`baseline.enforce=true`; `new-users-total` is report-only) |
+| 00 baseline + F1–F5 | done (`baseline.enforce=true` for roles / Phase 1 output; user counts report-only) |
 | 03a, 03b, 03c, 03d, 03h | done (03d seeds `team-leader` / `support-agent` project roles per project) |
 | 03e, 03f, 03g | **not implemented** (need permission name mapping / 2FA re-encryption / D3 = true) |
 | 04a, 04b, 04c | done (04c matches Phase 2 rows; refresh overrides) |

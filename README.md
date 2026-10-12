@@ -102,7 +102,8 @@ Exit code `0` = success, `1` = a step failed (the log shows the SQL and the erro
 Other switches: `--migration.refresh=true` updates each step's refreshable columns on rows that already exist.
 `--migration.reset-checkpoints=true` re-scans the big steps from the first old id.
 `--migration.skip-steps=09j-recipients` leaves steps out.
-`--migration.baseline.enforce=false` reports a baseline difference instead of stopping.
+Step 00 stops on missing seed roles or missing Phase 1 output. The user counts are report only unless pinned with
+`--migration.baseline.mapped-users=…` etc. `--migration.baseline.enforce=false` reports a baseline difference instead of stopping.
 
 ## 5. Steps
 

@@ -89,12 +89,13 @@ public class MigrationProperties {
     }
 
     public static class Baseline {
-        /** Stop the run when the Phase 1 numbers differ from the expected values below. */
+        /** Stop the run on a baseline problem: missing roles, no Phase 1 output, or a count that differs from a value set below. */
         private boolean enforce = true;
-        private Long oldUsers = 539L;
-        private Long mappedUsers = 529L;
-        private Long distinctNewUsers = 487L;
-        private Long newUsersTotal = null;   // grows once the new system is live; report only by default
+        // expected counts: null = report only (the run follows migration_id_map as it is); set one to pin it
+        private Long oldUsers = null;
+        private Long mappedUsers = null;
+        private Long distinctNewUsers = null;
+        private Long newUsersTotal = null;
         public boolean isEnforce() { return enforce; }
         public void setEnforce(boolean enforce) { this.enforce = enforce; }
         public Long getOldUsers() { return oldUsers; }
