@@ -159,8 +159,8 @@ public class MigrationProperties {
         private String leadRoleName = "Team Leader";
         private String memberRoleSlug = "support-agent";
         private String memberRoleName = "Support Agent";
-        /** messaging member table: team_member (the Organization service owns team_members) */
-        private String memberTable = "team_member";
+        /** messaging member table: msg_team_members (the Organization service owns team_members) */
+        private String memberTable = "msg_team_members";
         /** teams.routing_strategy of migrated teams (old teams had no routing): MANUAL | ROUND_ROBIN | LEAST_BUSY */
         private String routingStrategy = "MANUAL";
         public String getMemberTable() { return memberTable; }

@@ -11,9 +11,9 @@ import java.util.*;
  * 03d (decided 2026-10-08) — old live-chat agent teams go to the MESSAGING service's teams:
  * <pre>
  *  agent_teams        -> teams        (project of the team creator, routing_strategy MANUAL)
- *  agent_team_members -> team_member  (role admin -> LEAD, agent -> MEMBER; table name: migration.teams.member-table)
+ *  agent_team_members -> msg_team_members  (role admin -> LEAD, agent -> MEMBER; table name: migration.teams.member-table)
  * </pre>
- * The messaging member table is called {@code team_member} (not {@code team_members}): the Organization service owns a
+ * The messaging member table is called {@code msg_team_members} (not {@code team_members}): the Organization service owns a
  * different {@code team_members} table (referenced by project_team_member_permissions), so the two cannot share a name.
  * <ul>
  *   <li>Natural keys: team = (project_id, live name); member = (team_id, user_id).</li>
@@ -28,7 +28,7 @@ public class TeamsStep implements MigrationStep {
 
     @Override public String id() { return "03d-teams"; }
     @Override public int order() { return 340; }
-    @Override public String title() { return "agent_teams / members -> messaging teams / team_member"; }
+    @Override public String title() { return "agent_teams / members -> messaging teams / msg_team_members"; }
 
     @Override
     public void run(StepContext ctx) {
@@ -69,7 +69,7 @@ public class TeamsStep implements MigrationStep {
             });
         }
 
-        StepStats.Entity m = ctx.stats().entity("team_member");
+        StepStats.Entity m = ctx.stats().entity("msg_team_members");
         if (!db.tableExists(sql.tgtSchema(), memberTable)) {
             ctx.problems().error("agent_team_members", null, "TABLE_MISSING",
                     memberTable + " does not exist on the target: team members not migrated (create it, re-run 03d)");
