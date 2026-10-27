@@ -20,6 +20,8 @@ import java.util.*;
  *   <li>children are written only together with a newly inserted template; FLOW buttons have no ENUM value -> WARN</li>
  *   <li>variables: card_index -1, button_index -1 (the URL button's index for a button variable); a label that is not a
  *       valid attribute key becomes positional (body_1, header_1, button_0_1) -> INFO LABEL_RENAMED</li>
+ *   <li>variables written by an earlier run in the old format (card_index 0 / button_index 0, old text as label) are
+ *       rewritten in place to the format above, ids unchanged -> entity template_variable_repair</li>
  * </ul>
  * Refresh: status, meta_status_raw, category.
  */
@@ -136,6 +138,56 @@ public class TemplatesStep implements MigrationStep {
                 ctx.idMap().put("template", oldId, newId);
                 s.inserted++;
                 children(ctx, oldId, newId);
+            });
+        }
+        repairVariables(ctx);
+    }
+
+    // ------------------------------------------------------------------------------------------------ variable repair
+
+    /**
+     * Before 2026-10-27 this step wrote every variable with card_index 0 / button_index 0 and the old text as label, so
+     * messaging (HEADER/BODY parameters come only from card_index -1 / button_index -1) sent those templates without
+     * values. Rewrites them in place, ids unchanged, to what {@link #children} writes now.
+     *
+     * <p>Only templates of this migration whose variables are ALL still in that format: templates created in the new
+     * system use -1 and are never touched, and a repaired template has -1 values, so a second run finds nothing.
+     */
+    private void repairVariables(StepContext ctx) {
+        Db db = ctx.db();
+        Sql sql = ctx.sql();
+        String vars = sql.tgt("whatsapp_template_variables");
+        StepStats.Entity s = ctx.stats().entity("template_variable_repair");
+
+        List<Row> templates = db.rows("SELECT m.old_id, t.id FROM " + sql.mig("migration_id_map") + " m JOIN "
+                + sql.tgt("whatsapp_templates") + " t ON t.id = m.new_id WHERE m.entity = 'template'"
+                + " AND EXISTS (SELECT 1 FROM " + vars + " v WHERE v.template_id = t.id)"
+                + " AND NOT EXISTS (SELECT 1 FROM " + vars + " v WHERE v.template_id = t.id"
+                + " AND (v.card_index <> 0 OR v.button_index <> 0))" + ctx.scope().sql("t.project_id") + " ORDER BY t.id");
+
+        for (Row tpl : templates) {
+            long templateId = tpl.lng("id");
+            s.read++;
+            ctx.tx().row(ctx, "templates", tpl.lng("old_id"), () -> {
+                Long url = db.longValue("SELECT MIN(b.button_index) FROM " + sql.tgt("whatsapp_template_buttons") + " b JOIN "
+                        + sql.tgt("whatsapp_template_components") + " c ON c.id = b.component_id "
+                        + "WHERE c.template_id = :t AND b.button_type = 'URL'", Map.of("t", templateId));
+                for (Row v : db.rows("SELECT id, component_type, variable_index, label FROM " + vars
+                        + " WHERE template_id = :t ORDER BY id", Map.of("t", templateId))) {
+                    String type = v.str("component_type");
+                    int buttonIndex = -1;
+                    if ("BUTTON".equals(type)) {
+                        if (url == null) ctx.problems().warn("whatsapp_template_variables", v.lng("id"), "BUTTON_VARIABLE_NO_URL",
+                                "button variable " + v.integer("variable_index") + " but the template has no URL button -> button_index 0");
+                        buttonIndex = url == null ? 0 : url.intValue();
+                    }
+                    String label = variableLabel(v.str("label"), type, buttonIndex, v.integer("variable_index"));
+                    if (!label.equals(v.str("label")))
+                        ctx.problems().info("whatsapp_template_variables", v.lng("id"), "LABEL_RENAMED", "'" + v.str("label") + "' -> " + label);
+                    db.exec("UPDATE " + vars + " SET card_index = -1, button_index = :b, label = :l WHERE id = :id",
+                            Map.of("b", buttonIndex, "l", label, "id", v.lng("id")));
+                }
+                s.refreshed++;
             });
         }
     }
