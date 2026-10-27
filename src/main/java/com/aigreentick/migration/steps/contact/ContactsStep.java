@@ -35,6 +35,7 @@ public class ContactsStep implements MigrationStep {
         long invalid = ctx.props().getContacts().getInvalidStatusId();
         long source = ctx.props().getContacts().getSourceId();
         SeedRows.require(ctx, active, invalid, source);
+        ctx.tx().inTx(() -> SeedRows.repairZeroDates(ctx));
         String scope = ctx.scope().sql("m.project_id");
 
         // 2. contacts, batch per old-id range

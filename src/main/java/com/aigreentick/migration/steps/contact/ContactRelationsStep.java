@@ -102,7 +102,8 @@ public class ContactRelationsStep implements MigrationStep {
         Sql sql = ctx.sql();
         StepStats.Entity s = ctx.stats().entity("project_contact_assignee");
         ctx.tx().inTx(() -> s.refreshed += ctx.db().exec("UPDATE " + sql.tgt("project_contacts") + " pc JOIN ("
-                + "  SELECT m.project_id, mc.new_id AS contact_id, MAX(aa.assigned_at) AS at, "
+                // Copied inside MySQL, so the driver's zeroDateTimeBehavior=CONVERT_TO_NULL never sees it: a zero date is mapped here.
+                + "  SELECT m.project_id, mc.new_id AS contact_id, MAX(IF(aa.assigned_at < '1970-01-02', NULL, aa.assigned_at)) AS at, "
                 + "         CAST(SUBSTRING_INDEX(GROUP_CONCAT(aa.agent_id ORDER BY aa.assigned_at DESC, aa.id DESC), ',', 1) AS UNSIGNED) AS agent_old "
                 + "  FROM " + sql.old("agent_assignments") + " aa "
                 + "  JOIN " + sql.mig("mig_contact") + " m ON m.old_id = aa.contact_id "
@@ -149,7 +150,8 @@ public class ContactRelationsStep implements MigrationStep {
     private void tagAssignments(StepContext ctx) {
         Sql sql = ctx.sql();
         String insert = "INSERT INTO " + sql.tgt("contact_tag_assignments") + " (assigned_at, assigned_by, organization_id, project_id, contact_id, tag_id) "
-                + "SELECT MIN(COALESCE(tc.created_at, NOW(6))), NULL, t.organization_id, t.project_id, mc.new_id, t.id "
+                // zero date (sorts first, so MIN would pick it) -> now, as in ContactsStep
+                + "SELECT MIN(IF(tc.created_at IS NULL OR tc.created_at < '1970-01-02', NOW(6), tc.created_at)), NULL, t.organization_id, t.project_id, mc.new_id, t.id "
                 + "FROM " + sql.old("tag_contacts") + " tc "
                 + "JOIN " + sql.mig("migration_id_map") + " mt ON mt.entity = 'tag' AND mt.old_id = tc.tag_id "
                 + "JOIN " + sql.tgt("contact_tags") + " t ON t.id = mt.new_id "
@@ -202,7 +204,8 @@ public class ContactRelationsStep implements MigrationStep {
     private void listMembers(StepContext ctx) {
         Sql sql = ctx.sql();
         String insert = "INSERT INTO " + sql.tgt("contact_list_contacts") + " (added_at, added_by, organization_id, contact_id, list_id) "
-                + "SELECT MIN(COALESCE(gm.created_at, NOW(6))), NULL, l.organization_id, mc.new_id, l.id "
+                // zero date (sorts first, so MIN would pick it) -> now, as in ContactsStep
+                + "SELECT MIN(IF(gm.created_at IS NULL OR gm.created_at < '1970-01-02', NOW(6), gm.created_at)), NULL, l.organization_id, mc.new_id, l.id "
                 + "FROM " + sql.old("group_members") + " gm "
                 + "JOIN " + sql.mig("migration_id_map") + " ml ON ml.entity = 'list' AND ml.old_id = gm.group_id "
                 + "JOIN " + sql.tgt("contact_lists") + " l ON l.id = ml.new_id "

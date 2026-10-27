@@ -18,6 +18,8 @@ import java.util.*;
  *       if that live row was written by this migration, the older duplicate is inserted soft-deleted (newest first)</li>
  *   <li>status / category -> ENUM; unknown status -> UNKNOWN with the raw value in meta_status_raw</li>
  *   <li>children are written only together with a newly inserted template; FLOW buttons have no ENUM value -> WARN</li>
+ *   <li>variables: card_index -1, button_index -1 (the URL button's index for a button variable); a label that is not a
+ *       valid attribute key becomes positional (body_1, header_1, button_0_1) -> INFO LABEL_RENAMED</li>
  * </ul>
  * Refresh: status, meta_status_raw, category.
  */
@@ -170,6 +172,7 @@ public class TemplatesStep implements MigrationStep {
         }
 
         // buttons
+        Map<Long, Integer> urlButtonOf = new HashMap<>();
         for (Map.Entry<Long, Long> e : newComp.entrySet()) {
             if (!"BUTTONS".equals(typeOfOldComp.get(e.getKey()))) continue;
             int idx = 0;
@@ -182,6 +185,7 @@ public class TemplatesStep implements MigrationStep {
                             "button type '" + b.str("type") + "' has no target ENUM value -> skipped");
                     continue;
                 }
+                if ("URL".equals(type)) urlButtonOf.putIfAbsent(e.getKey(), idx);
                 long id = db.insert(sql.tgt("whatsapp_template_buttons"), Db.vals().with("button_index", idx++)
                         .with("button_type", type).with("created_at", b.dtOr("created_at", StepContext.now()))
                         .with("phone_number", Text.cut(b.text("number"), 30))
@@ -205,9 +209,21 @@ public class TemplatesStep implements MigrationStep {
                     ctx.problems().warn("template_texts", v.lng("id"), "DUPLICATE", vtype + " variable " + index + " repeated -> first kept");
                     continue;
                 }
-                db.insert(sql.tgt("whatsapp_template_variables"), Db.vals().with("button_index", 0).with("card_index", 0)
+                // -1 = not a button / not a carousel card: messaging builds HEADER and BODY parameters only from
+                // variables with card_index = -1 and button_index = -1. A button variable belongs to the URL button.
+                int buttonIndex = -1;
+                if ("BUTTON".equals(vtype)) {
+                    Integer url = urlButtonOf.get(v.lng("component_id"));
+                    if (url == null) ctx.problems().warn("template_texts", v.lng("id"), "BUTTON_VARIABLE_NO_URL",
+                            "button variable " + index + " but the template has no URL button -> button_index 0");
+                    buttonIndex = url == null ? 0 : url;
+                }
+                String label = variableLabel(v.str("text"), vtype, buttonIndex, index);
+                if (!label.equals(v.str("text")))
+                    ctx.problems().info("template_texts", v.lng("id"), "LABEL_RENAMED", "'" + v.str("text") + "' -> " + label);
+                db.insert(sql.tgt("whatsapp_template_variables"), Db.vals().with("button_index", buttonIndex).with("card_index", -1)
                         .with("component_type", vtype).with("created_at", v.dtOr("created_at", StepContext.now()))
-                        .with("label", Text.cut(v.str("text"), 100)).with("label_value", Text.cut(v.str("default_value"), 255))
+                        .with("label", label).with("label_value", Text.cut(v.str("default_value"), 255))
                         .with("variable_index", index).with("template_id", templateId));
                 if (!"BUTTON".equals(vtype))
                     examples.computeIfAbsent(v.lng("component_id"), k -> new TreeMap<>())
@@ -265,5 +281,23 @@ public class TemplatesStep implements MigrationStep {
                 }
             }
         }
+    }
+
+    /** A Contact attribute key (contact's CreateAttributeDefinitionRequest): what a campaign fills the variable from. */
+    private static final java.util.regex.Pattern ATTRIBUTE_KEY = java.util.regex.Pattern.compile("^[a-z][a-z0-9_]{0,119}$");
+
+    /**
+     * The variable's label, which is also the attribute key a campaign reads its value from (CSV column attr:&lt;label&gt;,
+     * variableDefaults key). The old text is kept when it is already a valid key; otherwise ({{1}}, 1, Name, MEMBER ID,
+     * an example value, empty) the label is positional: header_1, body_2, button_0_1, unique per template. Two variables
+     * that keep the same valid text share one attribute, and so one value.
+     */
+    static String variableLabel(String oldText, String componentType, int buttonIndex, int variableIndex) {
+        if (oldText != null && ATTRIBUTE_KEY.matcher(oldText).matches()) return oldText;
+        return switch (componentType) {
+            case "HEADER" -> "header_" + variableIndex;
+            case "BUTTON" -> "button_" + buttonIndex + "_" + variableIndex;
+            default -> "body_" + variableIndex;
+        };
     }
 }
