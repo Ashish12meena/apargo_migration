@@ -3,6 +3,7 @@ package com.aigreentick.migration.core;
 import com.aigreentick.migration.config.MigrationProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
@@ -33,23 +34,36 @@ public class Bootstrap {
     private final ProblemLog problems;
     private final MigrationProperties props;
 
-    public Bootstrap(Db db, Sql sql, IdMap idMap, TenantResolver tenants, ProblemLog problems, MigrationProperties props) {
+    private final String jdbcUrl;
+
+    public Bootstrap(Db db, Sql sql, IdMap idMap, TenantResolver tenants, ProblemLog problems, MigrationProperties props,
+                     Environment env) {
         this.db = db;
         this.sql = sql;
         this.idMap = idMap;
         this.tenants = tenants;
         this.problems = problems;
         this.props = props;
+        this.jdbcUrl = env.getProperty("spring.datasource.url", "?");
     }
 
     public void prepare() {
         problems.beginStep("bootstrap");
+        logConnection();
         importLegacyMap();
         forgetOldWabaSchema();
         backfillProjects();
         int n = tenants.writeTenantMap();
         log.info("  mig_tenant_map rewritten for {} old users", n);
         problems.endStep();
+    }
+
+    /** which server the run really talks to: a wrong DB_HOST shows up here instead of as an empty target in step 00 */
+    void logConnection() {
+        Row s = db.rows("SELECT @@hostname AS host, @@port AS port, (SELECT COUNT(*) FROM " + sql.tgt("users") + ") AS users").get(0);
+        log.info("  jdbc {}", jdbcUrl.replaceFirst("\\?.*$", ""));
+        log.info("  connected to MySQL {}:{} | old={} target={} mig={} | target users {}",
+                s.str("host"), s.lng("port"), sql.oldSchema(), sql.tgtSchema(), sql.migSchema(), s.lng("users"));
     }
 
     void importLegacyMap() {

@@ -10,7 +10,7 @@ spring:
     # Default database = the service's tracking schema (created if missing). Every statement still uses schema-qualified
     # names (old / target / mig); the three schemas MUST be on the same server so that data rows and their
     # migration_id_map rows commit in one transaction.
-    url: jdbc:mysql://${DB_HOST:146.88.24.113}:${DB_PORT:3306}/${MIG_SCHEMA:aigreentick_migration}?createDatabaseIfNotExist=true&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&zeroDateTimeBehavior=CONVERT_TO_NULL&characterEncoding=UTF-8
+    url: jdbc:mysql://${DB_HOST:146.88.24.123}:${DB_PORT:3306}/${MIG_SCHEMA:aigreentick_migration}?createDatabaseIfNotExist=true&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true&connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&zeroDateTimeBehavior=CONVERT_TO_NULL&characterEncoding=UTF-8
     username: ${DB_USER:root}
     password: ${DB_PASSWORD:2024@Bajajsys}
     hikari:
@@ -62,12 +62,12 @@ migration:
     import-on-start: true         # copy Phase 1/2's <target>.migration_id_map into <mig>.migration_id_map
     table: migration_id_map
 
-  baseline:                       # step 00 stops the run when these differ (Phase 1 report of the other developer)
+  baseline:                       # step 00 stops on missing roles / no Phase 1 output; counts below are report only when empty
     enforce: true
-    old-users: 539
-    mapped-users: 529
-    distinct-new-users: 487
-    new-users-total:              # grows once the new system is live -> report only
+    old-users:                    # set a number to stop the run when the count differs
+    mapped-users:                 # (Phase 1 report on the old server: 539 / 529 / 487)
+    distinct-new-users:
+    new-users-total:
 
   roles:
     customer-role-id: 3

@@ -31,7 +31,7 @@ goes to `mig_errors`. Step `99-validate` then checks every relation.
 | MySQL | 8.0. `aigreentick_2nd` (staging copy) and `apargo_wa_messaging` must be **on the same server**: data rows and their `migration_id_map` rows commit in one transaction |
 | Tracking schema | `aigreentick_migration`, created and versioned by Flyway (`src/main/resources/db/migration`). Flyway never touches the other two schemas |
 
-Default connection: server **146.88.24.113:3306**, user **root** (password from `DB_PASSWORD`). If you later use a
+Default connection: server **146.88.24.123:3306**, user **root** (password from `DB_PASSWORD`). If you later use a
 dedicated user instead of root, these grants are enough (`scripts/grants.sql`):
 
 ```sql
@@ -53,7 +53,7 @@ on the command line or with an environment variable.
 
 | Env var | Meaning |
 |---|---|
-| `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` | MySQL server holding all three schemas. Defaults: `146.88.24.113`, `3306`, `root`; the password has no default |
+| `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` | MySQL server holding all three schemas. Defaults: `146.88.24.123`, `3306`, `root`; the password has no default |
 | `OLD_SCHEMA` / `TARGET_SCHEMA` / `MIG_SCHEMA` | default `aigreentick_2nd` / `apargo_wa_messaging` / `aigreentick_migration` |
 
 ### Decisions (MIGRATION_PLAN.md section 6): each one is a setting
@@ -75,7 +75,7 @@ Always on a **staging copy** first.
 
 ```bash
 JAR=target/migration-service.jar
-export DB_PASSWORD=...          # host 146.88.24.113 and user root are the defaults
+export DB_PASSWORD=...          # host 146.88.24.123 and user root are the defaults
 
 # 1. baseline: Phase 1/2 numbers + follow-ups F1-F5 (stops when the numbers differ from migration.baseline.*)
 java -jar $JAR --migration.steps=00-baseline
@@ -102,7 +102,8 @@ Exit code `0` = success, `1` = a step failed (the log shows the SQL and the erro
 Other switches: `--migration.refresh=true` updates each step's refreshable columns on rows that already exist.
 `--migration.reset-checkpoints=true` re-scans the big steps from the first old id.
 `--migration.skip-steps=09j-recipients` leaves steps out.
-`--migration.baseline.enforce=false` reports a baseline difference instead of stopping.
+Step 00 stops on missing seed roles or missing Phase 1 output. The user counts are report only unless pinned with
+`--migration.baseline.mapped-users=…` etc. `--migration.baseline.enforce=false` reports a baseline difference instead of stopping.
 
 ## 5. Steps
 

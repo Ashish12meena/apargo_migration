@@ -1,4 +1,4 @@
--- Run on the server (146.88.24.113) and send back the output.
+-- Run on the server (146.88.24.123) and send back the output.
 -- Answers every seed / reference-data question of docs/seed_data_and_assumptions.md (S-1 .. S-10).
 USE apargo_wa_messaging;
 

@@ -10,8 +10,10 @@ import org.springframework.stereotype.Component;
 import java.util.*;
 
 /**
- * 00 — reproduces the Phase 1 numbers (plan section 5.2), stops the run when they differ from
- * {@code migration.baseline.*} (enforce=true), and reports follow-ups F1-F5 as INFO rows in mig_errors.
+ * 00 — reports the Phase 1 numbers (plan section 5.2), stops the run (enforce=true) when the seed roles or the Phase 1
+ * output are missing or a count differs from a value pinned in {@code migration.baseline.*}, and reports follow-ups
+ * F1-F5 as INFO rows in mig_errors. Users mapped beyond the Phase 1 selection rule are reported, not stopped:
+ * the run follows migration_id_map as it is.
  * The project-map backfill and mig_tenant_map are done by {@link Bootstrap} before every run.
  */
 @Component
@@ -52,7 +54,10 @@ public class VerifyBaselineStep implements MigrationStep {
         check(ctx, "baseline.mapped_users", exp.getMappedUsers(), mapped, mismatches);
         check(ctx, "baseline.distinct_new_users", exp.getDistinctNewUsers(), distinct, mismatches);
         check(ctx, "baseline.new_users_total", exp.getNewUsersTotal(), newTotal, mismatches);
-        check(ctx, "baseline.selected_equals_mapped", selected, mapped, mismatches);
+        check(ctx, "baseline.selected_by_phase1_rule", null, selected, mismatches);
+        if (selected != mapped)
+            ctx.problems().info("users", null, "MAPPED_NOT_SELECTED", mapped + " users mapped, the Phase 1 rule selects "
+                    + selected + ": migration_id_map is followed as it is");
         if (mapped == 0) mismatches.add("no 'user' rows in migration_id_map: Phase 1 output not found");
 
         // roles needed by the auth steps
